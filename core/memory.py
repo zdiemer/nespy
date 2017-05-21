@@ -81,17 +81,6 @@ class Memory(object):
         self.ranges = ranges
 
     def write(self, loc, data):
-        """Writes to a memory location starting at loc, extending to loc + data"""
-        if loc >= self.size or loc + len(data) >= self.size:
-            # TODO: Throw an error here
-            return
-        elif loc < 0:
-            # TODO: Throw an error here
-            return
-
-        tmp = hex(data).replace("0x", "")
-
-    def single_write(self, loc, data):
         """Writes to a memory location given location and data"""
         if self.mem_type == const.TYPE_CPU:
             # Check if in mirrored ranges
