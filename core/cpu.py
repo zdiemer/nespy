@@ -1,7 +1,7 @@
 """This module defines the behavior of the NES Central Processing Unit, an
    offshoot of the Ricoh 2A03. It is fully implemented in this class."""
 
-from ctypes import c_uint8
+from ctypes import c_uint8, c_uint16
 import constants as const
 import memory as mem
 
@@ -22,7 +22,7 @@ class CPU(object):
         self.pc = 0x0000
 
         # Stack Pointer -- offset from the stack
-        self.sp = 0x00fd
+        self.sp = 0x00ff
 
         # Accumulator
         self.a = 0x0000
@@ -115,15 +115,14 @@ class CPU(object):
         self.set_z(value)
         self.set_n(value)
 
-    def inc_sp(self):
-        """Increment stack pointer"""
-
-        # not intuitive to *DECREMENT* here, but stack is in reverse order.
-        # additionally, no such thing as stack overflow. only loops.
-        self.sp = c_uint8(self.sp - 1).value
-
     def dec_sp(self):
         """Decrement stack pointer"""
+
+        # no such thing as stack overflow. only loops.
+        self.sp = c_uint8(self.sp - 1).value
+
+    def inc_sp(self):
+        """Increment stack pointer"""
 
         # similar to above
         self.sp = c_uint8(self.sp + 1).value
@@ -140,11 +139,35 @@ class CPU(object):
         self.push_stack((self.pc & 0b1111111100000000) >> 8)
         self.push_stack(self.pc & 0b11111111)
 
+    def read_stack(self):
+        """Read a byte from the stack"""
+
+        result = self.memory.read(0x100 + self.sp)
+        self.inc_sp()
+
+        return result
+
+    def read_pc(self):
+        """Read PC from the stack"""
+
+        self.pc = self.read_stack() << 8 | self.read_stack()
+
+    def print_cpu_state(self):
+        """Prints out current CPU state, using for testing"""
+        print("PC:", hex(self.pc))
+        print("SP:", hex(self.sp))
+        print("A:", hex(self.a))
+        print("X:", hex(self.x))
+        print("Y:", hex(self.y))
+        print("P:", bin(self.p))
+
+    ### Opcodes ###
+
     def adc(self, arg):
         """Add with Carry"""
 
         # add A register + argument + carry bit
-        result = self.a + arg + (self.p & 0b1)
+        result = self.a + arg + (self.p & const.FLAG_CARRY)
         uint_result = c_uint8(result).value
 
         # set carry bit if the result is greater than 255
@@ -178,31 +201,35 @@ class CPU(object):
 
         # bit shift the argument left
         result = arg << 1
+        uint_result = c_uint8(result).value
 
         # set the carry bit to the value of bit 7
         self.p &= ~(const.FLAG_CARRY)
         self.p |= 0b10000000 & arg > 0
 
         # set zero and/or negative flags
-        self.set_zn(result)
+        self.set_zn(uint_result)
 
         #save the result to the A register
-        self.a = result
+        self.a = uint_result
 
     def bcc(self, arg):
         """Branch if Carry Clear"""
 
         self.pc += arg if not self.p & const.FLAG_CARRY else 0
+        self.pc = c_uint16(self.pc).value
 
     def bcs(self, arg):
         """Branch if Carry Set"""
 
         self.pc += arg if self.p & const.FLAG_CARRY else 0
+        self.pc = c_uint16(self.pc).value
 
     def beq(self, arg):
         """Branch if Equal"""
 
         self.pc += arg if self.p & const.FLAG_ZERO else 0
+        self.pc = c_uint16(self.pc).value
 
     def bit(self, arg):
         """Bit Test"""
@@ -219,39 +246,41 @@ class CPU(object):
         """Branch if Minus"""
 
         self.pc += arg if self.p & const.FLAG_NEGATIVE else 0
+        self.pc = c_uint16(self.pc).value
 
     def bne(self, arg):
         """Branch if Not Equal"""
 
         self.pc += arg if not self.p & const.FLAG_ZERO else 0
+        self.pc = c_uint16(self.pc).value
 
     def bpl(self, arg):
         """Branch if Positive"""
 
         self.pc += arg if not self.p & const.FLAG_NEGATIVE else 0
+        self.pc = c_uint16(self.pc).value
 
     def brk(self):
         """Break"""
 
         # write PC and status to the stack
-        self.memory.write(self.sp, (self.pc & 0b1111111100000000) >> 8)
-        self.inc_sp()
+        self.push_pc()
+        self.push_stack(self.p)
 
-        self.memory.write(self.sp, self.pc & 0b11111111)
-        self.inc_sp()
-
-        self.memory.write(self.sp, self.p)
-        self.inc_sp()
+        # load the interrupt vector into the PC
+        self.pc = self.memory.read(0xfffe) << 8 | self.memory.read(0xffff)
 
     def bvc(self, arg):
         """Branch if Overflow Clear"""
 
         self.pc += arg if not self.p & const.FLAG_OVERFLOW else 0
+        self.pc = c_uint16(self.pc).value
 
     def bvs(self, arg):
         """Branch if Overflow Set"""
 
         self.pc += arg if self.p & const.FLAG_OVERFLOW else 0
+        self.pc = c_uint16(self.pc).value
 
     def clc(self):
         """Clear Carry Flag"""
@@ -274,7 +303,7 @@ class CPU(object):
 
         # do in place subtraction, not saving the result
         result = self.a - arg
-        uint_result = c_uint8(result)
+        uint_result = c_uint8(result).value
 
         # set carry flag if A >= arg
         self.p &= ~(const.FLAG_CARRY)
@@ -293,7 +322,7 @@ class CPU(object):
 
         # do in place subtraction, not saving the result
         result = self.x - arg
-        uint_result = c_uint8(result)
+        uint_result = c_uint8(result).value
 
         # set carry flag if X >= arg
         self.p &= ~(const.FLAG_CARRY)
@@ -312,7 +341,7 @@ class CPU(object):
 
         # do in place subtraction, not saving the result
         result = self.y - arg
-        uint_result = c_uint8(result)
+        uint_result = c_uint8(result).value
 
         # set carry flag if Y >= arg
         self.p &= ~(const.FLAG_CARRY)
@@ -329,14 +358,17 @@ class CPU(object):
     def dec(self, arg):
         """Decrement Memory"""
 
-        # TODO: Write the DEC operation
-        print arg
+        result = self.memory.read(arg) - 1
+        uint_result = c_uint8(result).value
+
+        self.set_zn(uint_result)
+        self.memory.write(arg, uint_result)
 
     def dex(self):
         """Decrement X Register"""
 
         result = self.x - 1
-        uint_result = c_uint8(result)
+        uint_result = c_uint8(result).value
 
         self.set_zn(uint_result)
         self.x = uint_result
@@ -345,7 +377,7 @@ class CPU(object):
         """Decrement X Register"""
 
         result = self.x - 1
-        uint_result = c_uint8(result)
+        uint_result = c_uint8(result).value
 
         self.set_zn(uint_result)
         self.x = uint_result
@@ -360,14 +392,17 @@ class CPU(object):
     def inc(self, arg):
         """Increment Memory"""
 
-        # TODO: Implement INC operation
-        print arg
+        result = self.memory.read(arg) + 1
+        uint_result = c_uint8(result).value
+
+        self.set_zn(uint_result)
+        self.memory.write(arg, result)
 
     def inx(self):
         """Increment X Register"""
 
         result = self.x + 1
-        uint_result = c_uint8(result)
+        uint_result = c_uint8(result).value
 
         self.set_zn(uint_result)
         self.x = uint_result
@@ -376,7 +411,7 @@ class CPU(object):
         """Increment Y Register"""
 
         result = self.y + 1
-        uint_result = c_uint8(result)
+        uint_result = c_uint8(result).value
 
         self.set_zn(uint_result)
         self.y = uint_result
@@ -384,15 +419,14 @@ class CPU(object):
     def jmp(self, arg):
         """Jump"""
 
-        # TODO: push current PC onto the stack (?)
-        # assign PC to equal arg
         self.pc = arg
 
     def jsr(self, arg):
         """Jump to Subroutine"""
 
-        # TODO: implement JSR operation
-        print arg
+        self.pc = c_uint16(self.pc - 1).value
+        self.push_pc()
+        self.pc = arg
 
     def lda(self, arg):
         """Load Accumulator"""
@@ -417,16 +451,17 @@ class CPU(object):
 
         # bit shift right
         result = arg >> 1
+        uint_result = c_uint8(result).value
 
         # set the carry bit to the previous value of bit 0
         self.p &= ~(const.FLAG_CARRY)
-        self.p |= 0b1 & arg > 0
+        self.p |= const.FLAG_CARRY & arg > 0
 
         # set zero and/or negative flags
-        self.set_zn(result)
+        self.set_zn(uint_result)
 
         #save the result to the A register
-        self.a = result
+        self.a = uint_result
 
     def nop(self):
         """No Operation"""
@@ -444,26 +479,22 @@ class CPU(object):
     def pha(self):
         """Push Accumulator"""
 
-        self.memory.write(self.sp, self.a)
-        self.inc_sp()
+        self.push_stack(self.a)
 
     def php(self):
         """Push Processor Status"""
 
-        self.memory.write(self.sp, self.p)
-        self.inc_sp()
+        self.push_stack(self.p)
 
     def pla(self):
         """Pull Accumulator"""
 
-        self.a = self.memory.read(self.sp)
-        self.dec_sp()
+        self.a = self.read_stack()
 
     def plp(self):
         """Pull Processor Status"""
 
-        self.p = self.memory.read(self.sp)
-        self.dec_sp()
+        self.p = self.read_stack()
 
     def rol(self, arg):
         """Rotate Left"""
@@ -478,19 +509,13 @@ class CPU(object):
     def rti(self):
         """Return from Interrupt"""
 
-        self.p = self.memory.read(self.sp)
-        self.dec_sp()
-
-        # TODO: PC is 16 bits, this needs to be re-written, or write function modified?
-        self.pc = self.memory.read(self.sp)
-        self.dec_sp()
+        self.p = self.read_stack()
+        self.pc = self.read_pc()
 
     def rts(self):
         """Return from Subroutine"""
 
-        # TODO: PC is 16 bits, this needs to be re-written, or write function modified?
-        self.pc = self.memory.read(self.sp) - 1
-        self.dec_sp()
+        self.pc = self.read_pc()
 
     def sbc(self, arg):
         """Subtract with Carry"""
