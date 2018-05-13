@@ -2,6 +2,8 @@
    CPU and the PPU. Each use a similar layout."""
 
 import constants as const
+from exceptions.memoryexceptions import MemoryLocationError
+
 
 def initialize_memory(mem_type):
     """Initializes memory based on the type of struct required"""
@@ -66,6 +68,7 @@ def initialize_memory(mem_type):
 
     return mem
 
+
 class Memory(object):
     """This class defines a memory bank to be used by either the CPU or PPU."""
 
@@ -80,8 +83,16 @@ class Memory(object):
         """Defines how to segment memory"""
         self.ranges = ranges
 
+    def check_memory_location(self, loc):
+        if loc >= self.size:
+            raise MemoryLocationError(loc, const.EXCEPTION_MEMORY_EXCEEDS_MAX)
+        elif loc < 0:
+            raise MemoryLocationError(loc, const.EXCEPTION_MEMORY_LESS_ZERO)
+
     def write(self, loc, data):
         """Writes to a memory location given location and data"""
+        self.check_memory_location(loc)
+
         if self.mem_type == const.TYPE_CPU:
             # Check if in mirrored ranges
             if loc in range(0x0000, 0x0800):
@@ -103,22 +114,12 @@ class Memory(object):
 
     def read(self, loc):
         """Reads from a range of memory"""
-        if loc >= self.size:
-            # TODO: Throw an error here
-            return
-        elif loc < 0:
-            # TODO: Throw an error here
-            return
+        self.check_memory_location(loc)
 
         return self.mem_bank[loc]
 
     def delete(self, loc):
         """Zeroes out a specified memory location"""
-        if loc >= self.size:
-            # TODO: Throw an error here
-            return
-        elif loc < 0:
-            # TODO: Throw an error here
-            return
+        self.check_memory_location(loc)
 
         self.ranges[loc] = 0x00
