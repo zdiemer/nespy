@@ -43,3 +43,7 @@ FLAG_DECIMAL = 0b00001000
 FLAG_INTERRUPT = 0b00000100
 FLAG_ZERO = 0b00000010
 FLAG_CARRY = 0b00000001
+
+# Exception Strings
+EXCEPTION_MEMORY_LESS_ZERO = "The requested memory location is less than zero."
+EXCEPTION_MEMORY_EXCEEDS_MAX = "The requested memory location is greater than the maximum memory size."
